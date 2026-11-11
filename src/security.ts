@@ -23,7 +23,12 @@ import { SESSION_COOKIE, SESSION_TTL_SECONDS } from "./settings";
 
 export { SESSION_COOKIE };
 
-export const PBKDF2_ROUNDS = 260_000;
+// NOTE: Cloudflare Workers' WebCrypto caps PBKDF2 at 100,000 iterations
+// (deriveBits throws NotSupportedError above that), so this must stay <=
+// 100,000 even though the Python original used Django's 260,000 default.
+// The round count is stored in the hash itself (`pbkdf2_sha256$<rounds>$…`),
+// so verifyPassword keeps working for hashes made with any round count.
+export const PBKDF2_ROUNDS = 100_000;
 
 export interface SessionPayload {
   u: string;
