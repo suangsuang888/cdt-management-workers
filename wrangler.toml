@@ -1,0 +1,30 @@
+name = "cdt-management-workers"
+main = "src/index.ts"
+compatibility_date = "2026-11-11"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 database — create it first, then replace database_id:
+#   npx wrangler d1 create cdt-management
+#   npx wrangler d1 migrations apply cdt-management --local
+#   npx wrangler d1 migrations apply cdt-management --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "cdt-management"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# Reconcile loop: once per minute (Workers Cron Triggers cannot run faster).
+# Deliberate degradation vs the original: no 5-second event-confirm thread,
+# no 10-second fast-reconcile window — use POST /api/v1/reconcile instead.
+[triggers]
+crons = ["*/1 * * * *"]
+
+[assets]
+directory = "./web/dist"
+not_found_handling = "single-page-application"
+
+[vars]
+CDT_RECONCILE_INTERVAL = "60"
+CDT_SHIFT_TIMEOUT_MINUTES = "10"
+CDT_DUTY_START_TRIES = "3"
+CDT_DUTY_STALL_SECONDS = "180"
+CDT_EVENT_RETAIN_DAYS = "14"
