@@ -549,12 +549,15 @@ export async function startInstance(env: Env, account: AliyunAccount): Promise<v
     return;
   }
   try {
-    // StartInstancesRequest.set_InstanceIds(list) -> indexed params InstanceIds.1...
+    // NOTE: like DescribeInstances above, the SDK serialises the id list
+    // as a JSON array string in the `InstanceIds` parameter. Indexed
+    // params (`InstanceIds.1`) are NOT accepted here: the API rejects the
+    // call with MissingParameter "InstanceId ... is not supplied".
     await rpcCall(ecsDomain(account.region_id), account, {
       Action: "StartInstances",
       Version: ECS_VERSION,
       RegionId: account.region_id,
-      "InstanceIds.1": account.instance_id,
+      InstanceIds: JSON.stringify([account.instance_id]),
     });
   } catch (exc) {
     const raw = `${errorCode(exc)} ${exc instanceof Error ? exc.message : String(exc)}`;
@@ -597,7 +600,9 @@ export async function stopInstance(
     Action: "StopInstances",
     Version: ECS_VERSION,
     RegionId: account.region_id,
-    "InstanceIds.1": account.instance_id,
+    // Same JSON-array form as StartInstances (see above): indexed
+    // `InstanceIds.1` is rejected with MissingParameter.
+    InstanceIds: JSON.stringify([account.instance_id]),
     StoppedMode: mode,
   };
   try {
