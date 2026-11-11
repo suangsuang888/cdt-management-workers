@@ -1,0 +1,12 @@
+# Local dev secrets — placeholders only. NEVER put real credentials here.
+# Copy to .dev.vars and fill in, then `npx wrangler dev`.
+# Production: use `npx wrangler secret put <NAME>` instead.
+ADMIN_PASSWORD=""
+SESSION_SECRET=""
+ENCRYPTION_KEY=""
+CLOUDFLARE_API_TOKEN=""
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""
+EMAIL_WEBHOOK_URL=""
+EMAIL_API_KEY=""
+CDT_DRY_RUN="1"
