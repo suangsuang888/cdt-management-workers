@@ -70,7 +70,8 @@ Port `app/repo.py` 1:1 in camelCase, same semantics:
 ### src/security.ts (agent 3)
 Port `app/security.py`: `hashPassword/verifyPassword` in the exact format
 `pbkdf2_sha256$<rounds>$<b64salt>$<b64hash>` (PBKDF2-SHA256 via WebCrypto,
-rounds = 260000 as in Python — check the source), `encrypt/decrypt` for
+rounds = 100000 — Workers' WebCrypto rejects iteration counts above
+100000, so the Python default of 260000 cannot be used here), `encrypt/decrypt` for
 AccessKey secrets (AES-256-GCM via WebCrypto, key derived from
 `ENCRYPTION_KEY`; stored format `aesgcm:v1:<base64(iv+ciphertext)>`; if the
 Python Fernet format cannot be reproduced, document the break in README —
