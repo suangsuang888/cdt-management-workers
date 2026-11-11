@@ -85,7 +85,7 @@ Workers 没有常驻进程、没有线程、没有 TCP 套接字，以下是**�
 
 - **旧 `cdt-management.db` 不能直接导入 D1**：`servers.access_key_secret` 解不出来。
 - 迁移办法：部署后在面板里重新填写每台服务器的 AccessKey Secret（或重新添加服务器）。`master.key` 与新 `ENCRYPTION_KEY` 也**不是**同一个东西，不要混用。
-- 登录密码格式未变：`pbkdf2_sha256$<rounds>$<b64salt>$<b64hash>`（PBKDF2-SHA256，260000 轮），密码哈希本身可以沿用。
+- 登录密码格式未变：`pbkdf2_sha256$<rounds>$<b64salt>$<b64hash>`（PBKDF2-SHA256，100000 轮——Workers 的 WebCrypto 最多只支持 100000 轮，Python 原版的 260000 轮在这里会报错），密码哈希本身可以沿用。
 
 ## 部署
 
