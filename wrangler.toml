@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "cdt-management"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "47f8e3f9-1dde-4319-90ed-aeac84d2eb1d"
 
 # Reconcile loop: once per minute (Workers Cron Triggers cannot run faster).
 # Deliberate degradation vs the original: no 5-second event-confirm thread,
