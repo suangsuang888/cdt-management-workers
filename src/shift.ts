@@ -3508,6 +3508,65 @@ export async function dailyReport(env: Env): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Confirm pending manual events (port of Python `_confirm_pending_events`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Python original ran a 5-second confirm thread: after a manual
+ * start/stop it polled DescribeInstances until the instance reached the
+ * target state, then finished the "running" event. That thread was never
+ * ported — nothing in the Workers reconcile round finished manual events,
+ * so the first manual start left a forever-"running" event behind and
+ * `manualAction`'s duplicate guard (`pendingManualExists`) then swallowed
+ * every later start for the same target state with a silent 200 (no API
+ * call, no error). This step runs once per reconcile round (1-minute cron
+ * / on-demand reconcile): it re-reads each waiting manual event's
+ * instance and finishes the event once the target state is reached, or
+ * after a 10-minute timeout so a stuck wait can never block manual
+ * control again.
+ */
+const MANUAL_CONFIRM_TIMEOUT_SECONDS = 600;
+
+async function confirmPendingManualEvents(env: Env): Promise<void> {
+  const nowTs = Math.floor(Date.now() / 1000);
+  for (const event of await repo.runningPendingEvents(env, "manual")) {
+    const server = await repo.getServer(env, num(event.server_id), true);
+    if (server === null) {
+      await repo.finishEvent(env, event.id, "error", "服务器已删除，等待收尾");
+      continue;
+    }
+    try {
+      await refreshServerState(env, server);
+    } catch {
+      // Unreadable this round: keep waiting; the timeout below still applies.
+    }
+    const fresh = (await repo.getServer(env, server.id)) ?? server;
+    const status = s(fresh.instance_status);
+    const target = s(event.pending_status);
+    if (target && status === target) {
+      await repo.addEventProgress(env, event.id, `已确认到位：${status}`);
+      await repo.finishEvent(env, event.id, "done", `已确认${status}`);
+      continue;
+    }
+    const waited = nowTs - num(event.pending_ts || event.ts);
+    if (waited > MANUAL_CONFIRM_TIMEOUT_SECONDS) {
+      const waitedMin = Math.max(1, Math.floor(waited / 60));
+      await repo.addEventProgress(
+        env,
+        event.id,
+        `等待超时（${waitedMin} 分钟），实例状态仍为 ${status || "未知"}`,
+      );
+      await repo.finishEvent(
+        env,
+        event.id,
+        "error",
+        `等待${target || "目标状态"}超时，实例状态仍为 ${status || "未知"}`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Top-level entry: reconcile_all
 // ---------------------------------------------------------------------------
 
@@ -3545,6 +3604,13 @@ export async function reconcileAll(env: Env): Promise<void> {
         messages.ev("闲散超限检查异常"),
         { detail: aliyun.briefError(exc), level: "error" },
       );
+    }
+
+    try {
+      await confirmPendingManualEvents(env);
+    } catch {
+      // A failed confirm round must never fail the whole round; the
+      // next tick retries, and the timeout still bounds the wait.
     }
 
     for (const group of await repo.listGroups(env)) {
