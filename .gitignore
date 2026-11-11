@@ -1,0 +1,7 @@
+node_modules/
+.dev.vars
+.wrangler/
+dist/
+web/node_modules/
+web/dist/
+.DS_Store
