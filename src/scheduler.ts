@@ -11,8 +11,9 @@
  *   `_confirm_pending_events`). A manual start/stop (or any event waiting
  *   for an instance state) is only confirmed on the next reconcile step,
  *   i.e. on the next 1-minute cron tick, instead of within ~5 seconds.
- *   Confirmation logic itself lives in the shift engine's reconcile step
- *   (agent 2's `shift.ts`); this module only drives the round.
+ *   Confirmation logic lives in `shift.ts` (`confirmPendingManualEvents`,
+ *   called from `reconcileAll`); a 10-minute timeout bounds the wait so a
+ *   stuck event can never block later manual start/stop calls.
  * - No fast-reconcile window (`request_fast_reconcile`, 10 s interval for
  *   90 s after a group is created). The cron interval is fixed at 1
  *   minute; the API's group-save handler still bootstraps a new group
