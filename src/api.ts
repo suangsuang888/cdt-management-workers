@@ -1358,7 +1358,7 @@ app.get("/api/v1/settings", async (c) => {
       body: config["notify_wh_body"] || "",
     },
     channels: notify.enabledChannels(c.env, config),
-    sdk_ready: aliyun.sdkReady(),
+    sdk_ready: await aliyun.sdkReady(c.env),
     dry_run: c.env.CDT_DRY_RUN === "1",
     repo: REPO,
     version: VERSION,
