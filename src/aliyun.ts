@@ -24,6 +24,7 @@
  */
 
 import type { Env } from "./env";
+import { listServers } from "./repo";
 
 export class AliyunError extends Error {
   constructor(message: string) {
@@ -88,9 +89,16 @@ export function bssEndpoint(site: string): { region: string; domain: string } {
   return BSS_ENDPOINTS[site] ?? BSS_ENDPOINTS["china"]!;
 }
 
-/** No SDK in Workers — the RPC signature is implemented from scratch. */
-export function sdkReady(): boolean {
-  return false;
+/**
+ * Whether the Aliyun client is usable. There is no vendor SDK in Workers —
+ * the RPC signature is implemented from scratch — so "ready" means at least
+ * one registered server has its AccessKey secret configured. (Previously
+ * this was hardcoded to `false`, which made the panel permanently show
+ * "阿里云 SDK 未就绪" even with a working account.)
+ */
+export async function sdkReady(env: Env): Promise<boolean> {
+  const servers = await listServers(env);
+  return servers.some((s) => s.secret_configured);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,13 +269,22 @@ async function rpcCall<T>(
   } catch {
     throw new AliyunError(`接口返回非 JSON（HTTP ${res.status}）`);
   }
-  if (!res.ok || (data !== null && typeof data === "object" && "Code" in (data as RpcErrorBody) && typeof (data as RpcErrorBody).Code === "string")) {
-    const body = data as RpcErrorBody;
-    const code = typeof body.Code === "string" ? body.Code : `HTTP_${res.status}`;
-    const message = typeof body.Message === "string" ? body.Message : "";
-    const err = new AliyunError(message || code);
+  // NOTE: Aliyun RPC success responses may still carry a `Code` field —
+  // BSS returns Code "200" (QueryAccountBalance) or "Success"
+  // (DescribeInstanceBill) on success, while ECS responses carry no Code
+  // at all. Treating any present Code as an error made every BSS query
+  // fail with e.g. "Success：Successful!" / "200：success" even though the
+  // call had succeeded. Only a non-2xx HTTP status or a non-success Code
+  // is an error.
+  const body = (data !== null && typeof data === "object" ? data : {}) as RpcErrorBody;
+  const code = typeof body.Code === "string" ? body.Code : "";
+  const message = typeof body.Message === "string" ? body.Message : "";
+  const isSuccessCode = code === "" || code === "200" || code === "Success";
+  if (!res.ok || !isSuccessCode) {
+    const errCode = code || `HTTP_${res.status}`;
+    const err = new AliyunError(message || errCode);
     // Attach the code so callers (site fallback, no-stock detection) can read it.
-    (err as AliyunError & { code?: string }).code = code;
+    (err as AliyunError & { code?: string }).code = errCode;
     throw err;
   }
   return data as T;
