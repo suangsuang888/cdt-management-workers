@@ -139,6 +139,19 @@ function rawLabel(server: ServerInfo): string {
   return String(server.label ?? "").trim();
 }
 
+function rawInstanceId(server: ServerInfo): string {
+  return String(server.instance_id ?? "").trim();
+}
+
+/**
+ * What a notification title identifies a server by: the Aliyun instance
+ * ID (`i-...`) first, falling back to the panel alias. The alias alone
+ * (e.g. "CDT") does not tell several servers apart; the ID does.
+ */
+function titleServer(server: ServerInfo): string {
+  return rawInstanceId(server) || rawLabel(server);
+}
+
 function instanceOf(server: ServerInfo): string {
   return escapeHtml(String(server.instance_id ?? ""));
 }
@@ -371,12 +384,12 @@ export function shiftDone(
       ),
     );
   if (delayed) {
-    const label = rawLabel(duty);
-    const note = label ? `延迟恢复，${label}` : "延迟恢复";
+    const server = titleServer(duty);
+    const note = server ? `延迟恢复，${server}` : "延迟恢复";
     return titled("shift_done", "✅", titleOf("换班成功", groupName, SCOPE_GROUP, note), body);
   }
   const event = manual ? "手动换班完成" : "换班完成";
-  return titled("shift_done", "✅", titleOf(event, groupName, SCOPE_GROUP, rawLabel(duty)), body);
+  return titled("shift_done", "✅", titleOf(event, groupName, SCOPE_GROUP, titleServer(duty)), body);
 }
 
 export function shiftFailover(
@@ -396,7 +409,7 @@ export function shiftFailover(
   return titled(
     "shift_failover",
     "⚠️",
-    titleOf("故障转移", groupName, SCOPE_GROUP, rawLabel(duty)),
+    titleOf("故障转移", groupName, SCOPE_GROUP, titleServer(duty)),
     `📢 <b>故障转移</b>：${cause}，已启用备用实例。\n${SEP}\n` + joinBlocks(parts),
   );
 }
@@ -439,7 +452,7 @@ export function limitStop(
   return titled(
     "limit_stop",
     "🚨",
-    titleOf("全局熔断", groupName, SCOPE_GROUP, rawLabel(server)),
+    titleOf("全局熔断", groupName, SCOPE_GROUP, titleServer(server)),
     [
       `当班实例流量超限，该换班组没有启用故障转移，${stopped}。`,
       "如有需要，请开启故障转移或者去管理后台手动点击“立即换班”。",
@@ -465,7 +478,7 @@ export function overLimit(
   return titled(
     "limit_stop",
     "🚨",
-    titleOf("超限停机", "", scope, rawLabel(server)),
+    titleOf("超限停机", "", scope, titleServer(server)),
     [
       `流量已到阈值，${paused}，不再自动开机。`,
       "流量回落到阈值以下（流量包重置或调高阈值）后自动恢复。",
@@ -490,8 +503,8 @@ export function recovery(
 ): Message {
   const title =
     kind === "keepalive"
-      ? titleOf("抢占恢复", "", SCOPE_KEEPALIVE, rawLabel(server))
-      : titleOf("抢占恢复", groupName, SCOPE_GROUP, rawLabel(server));
+      ? titleOf("抢占恢复", "", SCOPE_KEEPALIVE, titleServer(server))
+      : titleOf("抢占恢复", groupName, SCOPE_GROUP, titleServer(server));
   const lines = [
     headline,
     "",
@@ -540,7 +553,7 @@ export function shiftError(
   return titled(
     "shift_error",
     "⚠️",
-    titleOf("换班异常", groupName, SCOPE_GROUP, rawLabel(duty)),
+    titleOf("换班异常", groupName, SCOPE_GROUP, titleServer(duty)),
     `⏳ <b>换班超时：换班指令已执行 ${minutes} 分钟，但状态未就绪。</b>\n\n` +
       joinBlocks(parts),
   );
@@ -615,6 +628,7 @@ export function dailyReport(servers: ServerInfo[], timestamp: string): Message {
 export interface TrafficSnapshot {
   id?: number | string;
   label?: string;
+  instance_id?: string;
   traffic_used?: number | string | null;
   quota_gb?: number | string | null;
   monthly_cost?: number | string | null;
@@ -636,8 +650,14 @@ export function trafficFooter(
     const quota = Number(server.quota_gb ?? 0) || 200.0;
     const percent = quota > 0 ? (used / quota) * 100 : 0.0;
     const daily = dailyById.get(Number(server.id ?? 0)) ?? 0;
+    const label = escapeHtml(String(server.label ?? ""));
+    const instanceId = escapeHtml(String(server.instance_id ?? ""));
+    const head =
+      label && instanceId
+        ? `🖥 ${label}（${instanceId}）`
+        : `🖥 ${label || instanceId}`;
     const lines = [
-      `🖥 ${escapeHtml(String(server.label ?? ""))}`,
+      head,
       `┃ 📈 当日流量：${daily.toFixed(2)} GB`,
       `┃ 📦 当月流量：${used.toFixed(2)} GB / ${fmt(quota)} GB (${percent.toFixed(2)}%)`,
       `┃ 💰 当月费用：${money(server.monthly_cost, server.billing_currency)}`,
