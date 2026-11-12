@@ -85,6 +85,7 @@ export default function SettingsDrawer({ settings, onClose, onSaved }: Props) {
         notify_on_limit_stop: form.notify_on_limit_stop,
         notify_on_error: form.notify_on_error,
         notify_on_keepalive: form.notify_on_keepalive,
+        notify_on_power: form.notify_on_power,
         ddns: {
           enabled: form.ddns.enabled,
           provider: form.ddns.provider,
@@ -798,6 +799,12 @@ export default function SettingsDrawer({ settings, onClose, onSaved }: Props) {
                         draft.notify_on_breaker = value
                       })
                     }
+                  />
+                  <Switch
+                    label="开关机通知"
+                    hint="手动点开机后实例上线时、手动点关机或保活窗口结束要停机时提醒；保活抢占拉起走「实例恢复运行」，换班开关机走「换班完成」，不重复发"
+                    checked={form.notify_on_power}
+                    onChange={(value) => patch((draft) => (draft.notify_on_power = value))}
                   />
                   <Switch
                     label="换班异常"
