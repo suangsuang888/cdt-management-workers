@@ -229,6 +229,7 @@ INSERT INTO settings(key, value) VALUES('notify_on_breaker', '1') ON CONFLICT(ke
 INSERT INTO settings(key, value) VALUES('notify_on_limit_stop', '1') ON CONFLICT(key) DO NOTHING;
 INSERT INTO settings(key, value) VALUES('notify_on_error', '1') ON CONFLICT(key) DO NOTHING;
 INSERT INTO settings(key, value) VALUES('notify_on_keepalive', '1') ON CONFLICT(key) DO NOTHING;
+INSERT INTO settings(key, value) VALUES('notify_on_power', '1') ON CONFLICT(key) DO NOTHING;
 INSERT INTO settings(key, value) VALUES('ddns_enabled', '0') ON CONFLICT(key) DO NOTHING;
 INSERT INTO settings(key, value) VALUES('ddns_provider', 'cloudflare') ON CONFLICT(key) DO NOTHING;
 INSERT INTO settings(key, value) VALUES('ddns_cf_auth_mode', 'token') ON CONFLICT(key) DO NOTHING;
