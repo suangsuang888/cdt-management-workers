@@ -637,14 +637,13 @@ export function trafficFooter(
     const percent = quota > 0 ? (used / quota) * 100 : 0.0;
     const daily = dailyById.get(Number(server.id ?? 0)) ?? 0;
     const lines = [
+      `🖥 ${escapeHtml(String(server.label ?? ""))}`,
       `┃ 📈 当日流量：${daily.toFixed(2)} GB`,
       `┃ 📦 当月流量：${used.toFixed(2)} GB / ${fmt(quota)} GB (${percent.toFixed(2)}%)`,
       `┃ 💰 当月费用：${money(server.monthly_cost, server.billing_currency)}`,
       `┃ 💳 账户余额：${money(server.balance_amount, server.billing_currency)}`,
     ];
-    return servers.length > 1
-      ? [`🖥 ${escapeHtml(String(server.label ?? ""))}`, ...lines].join("\n")
-      : lines.join("\n");
+    return lines.join("\n");
   });
   return `📊 流量与费用\n${blocks.join("\n\n")}`;
 }
