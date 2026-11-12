@@ -101,15 +101,16 @@ export function stopTail(servers: ServerInfo[]): string {
 
 /** 服务器行（来自 repo.listServers / 阿里云实例快照的并集视图）。 */
 export interface ServerInfo {
+  id?: number | string;
   label?: string;
   instance_id?: string;
   public_ip?: string;
   stopped_mode?: string;
   instance_status?: string;
-  traffic_used?: number | string;
-  threshold_gb?: number | string;
+  traffic_used?: number | string | null;
+  threshold_gb?: number | string | null;
   region_id?: string;
-  quota_gb?: number | string;
+  quota_gb?: number | string | null;
   monthly_cost?: number | string | null;
   balance_amount?: number | string | null;
   billing_currency?: string;
@@ -589,6 +590,52 @@ export function dailyReport(servers: ServerInfo[], timestamp: string): Message {
     "CDT-Management 每日报告",
     servers.map((s) => reportBlock(s)).join("\n\n") + `\n\n⏰ 更新时间：${timestamp}`,
   );
+}
+
+/**
+ * Traffic/cost footer appended to every event notification (not the daily
+ * report, which already has these numbers per server): today's traffic,
+ * month-to-date traffic against quota, this month's cost and the account
+ * balance — the same four lines the CDT Monitor daily report shows.
+ * `dailyById` is today's traffic per server id, computed against the
+ * midnight baseline in `notify.ts`. Takes the minimal snapshot shape so
+ * both `ServerView` (from the DB) and `ServerInfo` fit.
+ */
+export interface TrafficSnapshot {
+  id?: number | string;
+  label?: string;
+  traffic_used?: number | string | null;
+  quota_gb?: number | string | null;
+  monthly_cost?: number | string | null;
+  balance_amount?: number | string | null;
+  billing_currency?: string;
+}
+
+export function trafficFooter(
+  servers: TrafficSnapshot[],
+  dailyById: Map<number, number>,
+): string {
+  const fmt = (value: number): string =>
+    value
+      .toFixed(2)
+      .replace(/0+$/, "")
+      .replace(/\.$/, "");
+  const blocks = servers.map((server) => {
+    const used = Number(server.traffic_used ?? 0) || 0;
+    const quota = Number(server.quota_gb ?? 0) || 200.0;
+    const percent = quota > 0 ? (used / quota) * 100 : 0.0;
+    const daily = dailyById.get(Number(server.id ?? 0)) ?? 0;
+    const lines = [
+      `┃ 📈 当日流量：${daily.toFixed(2)} GB`,
+      `┃ 📦 当月流量：${used.toFixed(2)} GB / ${fmt(quota)} GB (${percent.toFixed(2)}%)`,
+      `┃ 💰 当月费用：${money(server.monthly_cost, server.billing_currency)}`,
+      `┃ 💳 账户余额：${money(server.balance_amount, server.billing_currency)}`,
+    ];
+    return servers.length > 1
+      ? [`🖥 ${escapeHtml(String(server.label ?? ""))}`, ...lines].join("\n")
+      : lines.join("\n");
+  });
+  return `📊 流量与费用\n${blocks.join("\n\n")}`;
 }
 
 export function shiftPeriod(slotName: string, start: string, end: string): string {
