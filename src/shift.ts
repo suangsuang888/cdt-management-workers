@@ -3508,61 +3508,183 @@ export async function dailyReport(env: Env): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Confirm pending manual events (port of Python `_confirm_pending_events`)
+// Confirm pending events (port of Python scheduler `_confirm_pending_events`)
 // ---------------------------------------------------------------------------
 
 /**
- * The Python original ran a 5-second confirm thread: after a manual
+ * The Python original ran a 5-second confirm thread: after any async
  * start/stop it polled DescribeInstances until the instance reached the
- * target state, then finished the "running" event. That thread was never
- * ported — nothing in the Workers reconcile round finished manual events,
- * so the first manual start left a forever-"running" event behind and
- * `manualAction`'s duplicate guard (`pendingManualExists`) then swallowed
- * every later start for the same target state with a silent 200 (no API
- * call, no error). This step runs once per reconcile round (1-minute cron
- * / on-demand reconcile): it re-reads each waiting manual event's
- * instance and finishes the event once the target state is reached, or
- * after a 10-minute timeout so a stuck wait can never block manual
- * control again.
+ * target state, then finished the "running" event — and, for a keepalive
+ * pull-up, sent the "抢占恢复" notification (unless the event is a
+ * window-resume, kind keepalive_quiet, which stays silent by design).
+ *
+ * That thread was never ported, so manual events stayed "running" forever
+ * (blocking later manual starts via the duplicate guard) and keepalive
+ * pull-ups never sent their recovery notification at all. This step runs
+ * once per reconcile round (1-minute cron / on-demand reconcile) instead
+ * of every 5 seconds:
+ * - manual / keepalive_stop / limit_stop: 10-minute timeout, then error;
+ * - keepalive: no timeout (it is supposed to keep trying until the
+ *   instance comes up); removed from keepalive, or out of its run window,
+ *   closes/retargets the event instead of waiting.
  */
-const MANUAL_CONFIRM_TIMEOUT_SECONDS = 600;
+const EVENT_CONFIRM_TIMEOUT_SECONDS = 600;
 
-async function confirmPendingManualEvents(env: Env): Promise<void> {
+async function confirmPendingEvents(env: Env, config: Config): Promise<void> {
   const nowTs = Math.floor(Date.now() / 1000);
-  for (const event of await repo.runningPendingEvents(env, "manual")) {
-    const server = await repo.getServer(env, num(event.server_id), true);
+  const tz = config.timezone ?? "Asia/Shanghai";
+  let keepaliveIds: Set<number> | null = null;
+  let keepaliveSchedules: Record<number, repo.KeepaliveSchedule> | null = null;
+  for (const event of await repo.listPendingEvents(env)) {
+    const serverId = num(event.server_id);
+    const target = s(event.pending_status);
+    const kind = s(event.pending_kind);
+    if (!serverId || !target) {
+      await repo.finishEvent(env, event.id, "error", "缺少待确认目标，已终止");
+      continue;
+    }
+
+    if (kind === "keepalive") {
+      if (keepaliveIds === null) keepaliveIds = await repo.keepaliveServerIds(env);
+      if (!keepaliveIds.has(serverId)) {
+        await repo.finishEvent(env, event.id, "error", "已移出单机保活，停止拉起");
+        await repo.clearFlag(env, `keepalive_tries:${serverId}`);
+        continue;
+      }
+      if (keepaliveSchedules === null) keepaliveSchedules = await repo.keepaliveSchedules(env);
+      const schedule = keepaliveSchedules[serverId];
+      if (schedule && truthy(schedule.enabled)) {
+        const [inWindow, windowText] = keepaliveWindowDetail(
+          schedule as unknown as Row,
+          nowTs,
+          tz,
+        );
+        if (!inWindow) {
+          const row = await repo.getServer(env, serverId);
+          const label = s(row?.label) || `#${serverId}`;
+          await repo.addEventProgress(
+            env,
+            event.id,
+            `已离开运行窗口${windowBracket(windowText)}，窗口外不再自动拉起`,
+          );
+          await repo.updateEvent(env, event.id, {
+            title: messages.ev("单机保活窗口暂停", messages.objServer(label)),
+            level: "info",
+            kind: "keepalive_pause",
+          });
+          await repo.retargetEvent(env, event.id, "Stopped", "keepalive_stop");
+          await repo.updateEvent(env, event.id, { detail: "等待停机到位" });
+          await repo.setFlag(env, `keepalive_rest:${serverId}`);
+          await repo.clearFlag(env, `keepalive_tries:${serverId}`);
+          continue;
+        }
+      }
+    }
+
+    const waited = nowTs - num(event.pending_ts || event.ts);
+    if (kind !== "keepalive" && waited > EVENT_CONFIRM_TIMEOUT_SECONDS) {
+      await repo.addEventProgress(env, event.id, "等待状态超时，未确认到位");
+      await repo.finishEvent(env, event.id, "error", "超时未确认");
+      continue;
+    }
+
+    const server = await repo.getServer(env, serverId, true);
     if (server === null) {
-      await repo.finishEvent(env, event.id, "error", "服务器已删除，等待收尾");
+      await repo.finishEvent(env, event.id, "error", "服务器已被删除");
       continue;
     }
     try {
       await refreshServerState(env, server);
-    } catch {
-      // Unreadable this round: keep waiting; the timeout below still applies.
-    }
-    const fresh = (await repo.getServer(env, server.id)) ?? server;
-    const status = s(fresh.instance_status);
-    const target = s(event.pending_status);
-    if (target && status === target) {
-      await repo.addEventProgress(env, event.id, `已确认到位：${status}`);
-      await repo.finishEvent(env, event.id, "done", `已确认${status}`);
+    } catch (exc) {
+      await repo.addEventProgress(env, event.id, `状态查询失败：${aliyun.briefError(exc)}`);
       continue;
     }
-    const waited = nowTs - num(event.pending_ts || event.ts);
-    if (waited > MANUAL_CONFIRM_TIMEOUT_SECONDS) {
-      const waitedMin = Math.max(1, Math.floor(waited / 60));
-      await repo.addEventProgress(
-        env,
-        event.id,
-        `等待超时（${waitedMin} 分钟），实例状态仍为 ${status || "未知"}`,
-      );
-      await repo.finishEvent(
-        env,
-        event.id,
-        "error",
-        `等待${target || "目标状态"}超时，实例状态仍为 ${status || "未知"}`,
-      );
+    const fresh = (await repo.getServer(env, serverId)) ?? server;
+    const status = s(fresh.instance_status);
+    if (status !== target) {
+      if (kind === "keepalive") continue;
+      const suffix = messages.statusSuffix(status, fresh.stopped_mode);
+      await repo.addEventProgress(env, event.id, `当前 ${status}${suffix}，等待到位`);
+      continue;
     }
+
+    const steps: string[] = [];
+    const record = async (text: string, summary?: string): Promise<void> => {
+      await repo.addEventProgress(env, event.id, text);
+      steps.push(summary ?? text);
+    };
+    await record(
+      `已确认 ${status}${messages.statusSuffix(status, fresh.stopped_mode)}`,
+      messages.resultLabel(status, fresh.stopped_mode),
+    );
+
+    if (kind === "keepalive" || target === "Running") {
+      if (kind === "keepalive") {
+        const tries = await repo.flagValue(env, `keepalive_tries:${serverId}`);
+        if (tries > 1) await record(`共尝试拉起 ${tries} 次`);
+      }
+      // DDNS sync on confirm (verify=True: force one real read).
+      let ddnsReport: DDNSReport | null = null;
+      let ddnsStatus = "❌ 同步异常";
+      try {
+        ddnsReport = await syncDdns(env, fresh, config, dns.TARGET_SERVER, serverId, {
+          ip: fresh.public_ip,
+          verify: true,
+        });
+        ddnsStatus = ddnsReport.status;
+      } catch (exc) {
+        ddnsStatus = `❌ 同步异常：${briefExc(exc)}`;
+      }
+      if (ddnsReport === null) {
+        await record(`DDNS：${ddnsStatus}`, "❌ 同步异常");
+      } else {
+        await record(`DDNS：${ddnsReport.detail}`, ddnsReport.brief);
+      }
+
+      if (kind === "keepalive") {
+        const quiet = s(event.kind) === "keepalive_quiet";
+        const doneTitle = quiet ? "单机保活窗口恢复" : "单机保活抢占恢复";
+        await repo.updateEvent(env, event.id, {
+          title: messages.ev(doneTitle, messages.objServer(fresh.label || "")),
+        });
+        await repo.clearFlag(env, `keepalive_tries:${serverId}`);
+        // Only non-quiet pull-ups notify: a window-resume is planned,
+        // pushing "疑被抢占" for it would be a false alarm. Gated by
+        // notify_on_keepalive (the "实例恢复运行" toggle sets this
+        // together with notify_on_recovery).
+        if (config.notify_on_keepalive === "1" && !quiet) {
+          try {
+            const results = await notify.sendAll(
+              env,
+              config,
+              messages.recovery(
+                info(fresh),
+                ddnsStatus,
+                "实例疑被抢占，已自动恢复运行。",
+                "keepalive",
+              ),
+            );
+            await notify.noteNotify(env, event.id, results);
+          } catch (exc) {
+            await record(`通知发送失败：${briefExc(exc)}`, "❌ 通知发送失败");
+          }
+        }
+      }
+    }
+
+    let summary = steps.join(" / ");
+    if (kind === "keepalive_stop") {
+      summary = `已暂停（${messages.modeLabel(fresh.stopped_mode) || "停机"}）`;
+    } else if (kind === "limit_stop") {
+      let reasonText = s(event.detail).trim();
+      if (reasonText.startsWith("等待停机到位")) {
+        const idx = reasonText.indexOf(" / ");
+        reasonText = idx >= 0 ? reasonText.slice(idx + 3).trim() : "";
+      }
+      const result = messages.resultLabel(status, fresh.stopped_mode);
+      summary = reasonText ? `${result} / ${reasonText}` : result;
+    }
+    await repo.finishEvent(env, event.id, "done", summary);
   }
 }
 
@@ -3607,7 +3729,7 @@ export async function reconcileAll(env: Env): Promise<void> {
     }
 
     try {
-      await confirmPendingManualEvents(env);
+      await confirmPendingEvents(env, config);
     } catch {
       // A failed confirm round must never fail the whole round; the
       // next tick retries, and the timeout still bounds the wait.
