@@ -105,6 +105,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   notify_on_limit_stop: "1",
   notify_on_error: "1",
   notify_on_keepalive: "1",
+  notify_on_power: "1",
   // DDNS
   ddns_enabled: "0",
   ddns_provider: "cloudflare",
