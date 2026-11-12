@@ -209,6 +209,7 @@ function usedLine(server: ServerInfo): string {
 export const SCOPE_GROUP = "换班组";
 export const SCOPE_KEEPALIVE = "单机保活";
 export const SCOPE_IDLE = "闲散手动";
+export const SCOPE_MANUAL = "手动";
 
 export function scopeTag(
   groupName = "",
@@ -517,6 +518,55 @@ export function recovery(
     SEP,
   ];
   return titled(kind, "🟢", title, lines.join("\n"));
+}
+
+export function powerOn(
+  server: ServerInfo,
+  ddnsStatus: string,
+  scope: string,
+): Message {
+  const lines = [
+    "实例已开机，正在运行。",
+    "",
+    `🖥 ${labelOf(server)}`,
+    `┃ 📦 实例：<code>${instanceOf(server)}</code>`,
+    `┃ 🌐 ＩＰ：${ipOf(server)}`,
+    `┃ 📍 地域：${regionOf(server)}`,
+    `┃ ☁️ DDNS：${ddnsStatus}`,
+    "┃ 🟢 状态：Running",
+    SEP,
+  ];
+  return titled(
+    "power_on",
+    "🟢",
+    titleOf("已开机", "", scope, titleServer(server)),
+    lines.join("\n"),
+  );
+}
+
+export function powerOff(
+  server: ServerInfo,
+  scope: string,
+  mode: string | null = null,
+): Message {
+  const modeText = mode ? modeLabel(mode) : "";
+  const head = modeText ? `实例即将关机（${modeText}）。` : "实例即将关机。";
+  const lines = [
+    head,
+    "",
+    `🖥 ${labelOf(server)}`,
+    `┃ 📦 实例：<code>${instanceOf(server)}</code>`,
+    `┃ 🌐 ＩＰ：${ipOf(server)}`,
+    `┃ 📍 地域：${regionOf(server)}`,
+    `┃ ${stateIcon(server)} 状态：${statusOf(server)}`,
+    SEP,
+  ];
+  return titled(
+    "power_off",
+    "🛑",
+    titleOf("即将关机", "", scope, titleServer(server)),
+    lines.join("\n"),
+  );
 }
 
 export function shiftError(
