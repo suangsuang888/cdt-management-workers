@@ -60,6 +60,7 @@ import {
   REPO,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
+  UPSTREAM_REPO,
   VERSION,
 } from "./settings";
 import {
@@ -1361,6 +1362,7 @@ app.get("/api/v1/settings", async (c) => {
     sdk_ready: await aliyun.sdkReady(c.env),
     dry_run: c.env.CDT_DRY_RUN === "1",
     repo: REPO,
+    upstream_repo: UPSTREAM_REPO,
     version: VERSION,
   });
 });
