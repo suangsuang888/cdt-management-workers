@@ -810,7 +810,7 @@ export default function SettingsDrawer({ settings, onClose, onSaved }: Props) {
             </>
           )}
 
-          {tab === 'about' && <AboutPanel repo={form.repo ?? ''} version={form.version ?? ''} />}
+          {tab === 'about' && <AboutPanel repo={form.repo ?? ''} upstreamRepo={form.upstream_repo ?? ''} version={form.version ?? ''} />}
 
           {testResult && (
             <div
@@ -854,20 +854,22 @@ export default function SettingsDrawer({ settings, onClose, onSaved }: Props) {
   )
 }
 
-function AboutPanel({ repo, version }: { repo: string; version: string }) {
+function AboutPanel({ repo, upstreamRepo, version }: { repo: string; upstreamRepo: string; version: string }) {
   const [latest, setLatest] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   async function check() {
-    if (!repo) {
-      setError('未配置仓库地址')
+    if (!upstreamRepo) {
+      setError('未配置上游仓库地址')
       return
     }
     setBusy(true)
     setError('')
     try {
-      setLatest(await fetchLatestRelease(repo))
+      // 查上游 Docker 版的最新 release（本移植版仓库没有发 release）；
+      // 只是看上游有没有出新版，不会真的更新任何东西。
+      setLatest(await fetchLatestRelease(upstreamRepo))
     } catch (err) {
       setError(err instanceof Error ? err.message : '检查失败')
     } finally {
@@ -877,11 +879,14 @@ function AboutPanel({ repo, version }: { repo: string; version: string }) {
 
   // 打开「关于」时自动查一次最新版本，无需手动点
   useEffect(() => {
-    if (repo) void check()
+    if (upstreamRepo) void check()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repo])
+  }, [upstreamRepo])
 
-  const newer = Boolean(latest) && latest.replace(/^v/, '') !== version
+  // 本移植版版本号带 -workers 后缀：拿掉后缀再跟上游比基础版本，
+  // 否则 1.3.11-workers 和 1.3.11 会被误判为「可更新」。
+  const baseVersion = version.replace(/-workers$/, '')
+  const newer = Boolean(latest) && latest.replace(/^v/, '') !== baseVersion
   const repoUrl = repo ? `https://github.com/${repo}` : ''
   const latestText = latest ? latest.replace(/^v/, 'v') : ''
 
@@ -910,7 +915,7 @@ function AboutPanel({ repo, version }: { repo: string; version: string }) {
           <b>v{version || '未知'}</b>
         </div>
         <div className="about-version-row">
-          <span className="about-key">最新版本</span>
+          <span className="about-key">上游最新版本</span>
           {busy ? (
             <span className="about-latest checking">
               <LoaderCircle size={12} className="spin" /> 检查中…
@@ -923,7 +928,7 @@ function AboutPanel({ repo, version }: { repo: string; version: string }) {
             <span className={`about-latest ${newer ? 'newer' : 'latest'}`}>
               <span className="about-dot" />
               {latestText}
-              {newer ? '（可更新）' : '（已是最新）'}
+              {newer ? '（上游有新版）' : '（已是最新）'}
             </span>
           ) : (
             <span className="about-latest dim">未检查</span>
@@ -932,7 +937,7 @@ function AboutPanel({ repo, version }: { repo: string; version: string }) {
       </div>
 
       <div>
-        <button className="btn" onClick={check} disabled={busy || !repo}>
+        <button className="btn" onClick={check} disabled={busy || !upstreamRepo}>
           {busy ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />}
           检查更新
         </button>
