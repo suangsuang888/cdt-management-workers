@@ -359,6 +359,7 @@ const SETTING_LABELS: Record<string, string> = {
   notify_on_limit_stop: "超限停机通知（单台）",
   notify_on_error: "异常通知",
   notify_on_keepalive: "保活通知",
+  notify_on_power: "开关机通知",
   ddns_enabled: "DDNS 开关",
   ddns_provider: "DDNS 服务商",
   ddns_cf_auth_mode: "DDNS 认证方式",
@@ -777,6 +778,7 @@ async function configFromDraft(env: Env, payload: AnyRow): Promise<Record<string
     "notify_on_limit_stop",
     "notify_on_error",
     "notify_on_keepalive",
+    "notify_on_power",
   ]) {
     putBool(key, payload[key]);
   }
@@ -1321,6 +1323,7 @@ app.get("/api/v1/settings", async (c) => {
     notify_on_limit_stop: config["notify_on_limit_stop"] === "1",
     notify_on_error: config["notify_on_error"] === "1",
     notify_on_keepalive: config["notify_on_keepalive"] === "1",
+    notify_on_power: (config["notify_on_power"] ?? "1") === "1",
     ddns: {
       enabled: config["ddns_enabled"] === "1",
       provider: config["ddns_provider"] || "cloudflare",
@@ -1425,6 +1428,7 @@ app.post("/api/v1/settings", async (c) => {
     "notify_on_limit_stop",
     "notify_on_error",
     "notify_on_keepalive",
+    "notify_on_power",
   ]) {
     putBool(key, payload[key]);
   }
