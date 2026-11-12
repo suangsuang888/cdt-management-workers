@@ -259,6 +259,7 @@ export type Settings = {
   sdk_ready: boolean
   dry_run: boolean
   repo?: string
+  upstream_repo?: string
   version?: string
 }
 
