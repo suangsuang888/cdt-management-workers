@@ -15,6 +15,7 @@
  */
 
 import type { Env } from "./env";
+import * as messages from "./messages";
 import * as repo from "./repo";
 
 /** 与 Python `notify.Message` 对应。`titleHtml`/`body` 是 CONTRACT 约定的字段名，
@@ -135,9 +136,10 @@ export async function sendAll(
   message: Message,
 ): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
+  const withFooter = await withTrafficFooter(env, config, message);
   for (const channel of enabledChannels(env, config)) {
     try {
-      await send(env, config, channel, message);
+      await send(env, config, channel, withFooter);
       results[channel] = "ok";
     } catch (exc) {
       const safe = safeError(exc, config);
@@ -146,6 +148,70 @@ export async function sendAll(
     }
   }
   return results;
+}
+
+/** Panel-timezone date key (YYYY-MM-DD) for daily-traffic baselines. */
+export function todayKey(tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/** Today's traffic for one server: month-to-date used minus the midnight baseline. */
+async function dailyTraffic(
+  env: Env,
+  server: repo.ServerView,
+  today: string,
+): Promise<number> {
+  const used = Number(server.traffic_used ?? 0) || 0;
+  const key = `${repo.TRAFFIC_DAY_PREFIX}${server.id}:${today}`;
+  const baseline = await repo.flagValueNum(env, key);
+  if (baseline === null) {
+    // First sight today (server just added, or first round after deploy):
+    // start counting from now; today's figure grows from here.
+    await repo.ensureFlagValue(env, key, used);
+    return 0;
+  }
+  return Math.max(0, used - baseline);
+}
+
+/**
+ * Append the traffic/cost footer to an event notification, so every report
+ * carries the day's and month's numbers after the main event (like the
+ * CDT Monitor daily report). The daily report itself already has these
+ * numbers per server, so it is left alone.
+ */
+export async function withTrafficFooter(
+  env: Env,
+  config: Record<string, string>,
+  message: Message,
+): Promise<Message> {
+  if (message.kind === "daily_report") return message;
+  const servers = await repo.listServers(env);
+  if (servers.length === 0) return message;
+  const tz = config["timezone"] || "Asia/Shanghai";
+  const today = todayKey(tz);
+  const dailyById = new Map<number, number>();
+  for (const server of servers) {
+    dailyById.set(server.id, await dailyTraffic(env, server, today));
+  }
+  const footer = messages.trafficFooter(servers, dailyById);
+  const html = `\n\n${footer}`;
+  const text = `\n\n${stripTags(footer)}`;
+  return {
+    ...message,
+    body: `${message.body}${html}`,
+    bodyHtml: message.bodyHtml ? `${message.bodyHtml}${html}` : undefined,
+    html: message.html ? `${message.html}${html}` : undefined,
+    text: message.text ? `${message.text}${text}` : undefined,
+  };
 }
 
 /** 把 sendAll 的返回值翻成一句写进事件进度的话。
