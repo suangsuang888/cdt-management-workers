@@ -11,9 +11,12 @@
  *   `_confirm_pending_events`). A manual start/stop (or any event waiting
  *   for an instance state) is only confirmed on the next reconcile step,
  *   i.e. on the next 1-minute cron tick, instead of within ~5 seconds.
- *   Confirmation logic lives in `shift.ts` (`confirmPendingManualEvents`,
- *   called from `reconcileAll`); a 10-minute timeout bounds the wait so a
- *   stuck event can never block later manual start/stop calls.
+ *   Confirmation logic lives in `shift.ts` (`confirmPendingEvents`,
+ *   called from `reconcileAll`): it covers manual, keepalive,
+ *   keepalive_stop and limit_stop events, sends the keepalive
+ *   "抢占恢复" notification (gated by `notify_on_keepalive`, silent for
+ *   window-resume events), and times out non-keepalive waits after
+ *   10 minutes so a stuck event can never block later manual control.
  * - No fast-reconcile window (`request_fast_reconcile`, 10 s interval for
  *   90 s after a group is created). The cron interval is fixed at 1
  *   minute; the API's group-save handler still bootstraps a new group
