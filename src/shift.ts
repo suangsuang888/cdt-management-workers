@@ -3508,6 +3508,43 @@ export async function dailyReport(env: Env): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Daily traffic baselines (for the footer on every notification)
+// ---------------------------------------------------------------------------
+
+/**
+ * Record today's midnight baseline (month-to-date traffic at the first
+ * reconcile of the day) for every server, so the notification footer can
+ * show today's traffic as `traffic_used - baseline`. Baselines are
+ * set-if-absent only — overwriting one mid-day would silently reset the
+ * day's figure to zero — and baselines older than yesterday are pruned.
+ */
+async function ensureTrafficDayBaselines(env: Env, config: Config): Promise<void> {
+  const tz = config.timezone ?? "Asia/Shanghai";
+  const today = notify.todayKey(tz);
+  const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let yesterdayKey: string;
+  try {
+    yesterdayKey = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(yesterdayDate);
+  } catch {
+    yesterdayKey = yesterdayDate.toISOString().slice(0, 10);
+  }
+  for (const server of await repo.listServers(env)) {
+    const used = Number(server.traffic_used ?? 0) || 0;
+    await repo.ensureFlagValue(
+      env,
+      `${repo.TRAFFIC_DAY_PREFIX}${server.id}:${today}`,
+      used,
+    );
+  }
+  await repo.pruneTrafficDayBaselines(env, [today, yesterdayKey]);
+}
+
+// ---------------------------------------------------------------------------
 // Confirm pending events (port of Python scheduler `_confirm_pending_events`)
 // ---------------------------------------------------------------------------
 
@@ -3733,6 +3770,13 @@ export async function reconcileAll(env: Env): Promise<void> {
     } catch {
       // A failed confirm round must never fail the whole round; the
       // next tick retries, and the timeout still bounds the wait.
+    }
+
+    try {
+      await ensureTrafficDayBaselines(env, config);
+    } catch {
+      // Baseline bookkeeping must never fail the round; the footer
+      // falls back to counting from the next sighting.
     }
 
     for (const group of await repo.listGroups(env)) {
