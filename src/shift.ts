@@ -1358,6 +1358,7 @@ async function keepaliveRest(
   env: Env,
   server: ServerView,
   windowText: string,
+  config: Config,
 ): Promise<void> {
   const serverId = server.id;
   const label = server.label || `#${serverId}`;
@@ -1416,6 +1417,19 @@ async function keepaliveRest(
     steps: [`已下发停机指令（${messages.modeLabel(mode)}）`],
     awaitStop: true,
   });
+  // 窗口结束要停机：停机指令已被接受、实例还没停稳时发一次。restFlag
+  // 是“这一轮休止只处理一次”的标记，通知跟它走，不会每分钟重复发。
+  if (config.notify_on_power === "1") {
+    try {
+      await notify.sendAll(
+        env,
+        config,
+        messages.powerOff(info(server), messages.SCOPE_KEEPALIVE, mode),
+      );
+    } catch {
+      // 通知失败绝不能让对账轮次报错。
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1572,7 +1586,7 @@ async function reconcileKeepalives(
     const [inWindow, windowText] = keepaliveWindowDetail(item, nowTs, tz);
     const restFlag = `keepalive_rest:${serverId}`;
     if (!inWindow) {
-      await keepaliveRest(env, server, windowText);
+      await keepaliveRest(env, server, windowText, config);
       results.push({
         keepalive: serverId,
         label: server.label,
@@ -3437,6 +3451,23 @@ export async function manualAction(
     },
   );
   await repo.addEventProgress(env, eventId, `已下发${label}指令`);
+  if (action === "stop") {
+    // 关机前提醒：停机指令已被接受、实例还没停稳时发。指令失败时上面
+    // 已经抛错，不会走到这里，也就不会误报。
+    const config = await repo.getSettings(env);
+    if (config.notify_on_power === "1") {
+      try {
+        const results = await notify.sendAll(
+          env,
+          config,
+          messages.powerOff(info(server), messages.SCOPE_MANUAL, stopMode || null),
+        );
+        await notify.noteNotify(env, eventId, results, "关机通知");
+      } catch {
+        // 通知失败绝不能让一次已经下发的关机动作报错。
+      }
+    }
+  }
 
   return {
     status: "pending",
@@ -3656,6 +3687,7 @@ async function confirmPendingEvents(env: Env, config: Config): Promise<void> {
     );
 
     if (kind === "keepalive" || target === "Running") {
+      const quiet = kind === "keepalive" && s(event.kind) === "keepalive_quiet";
       if (kind === "keepalive") {
         const tries = await repo.flagValue(env, `keepalive_tries:${serverId}`);
         if (tries > 1) await record(`共尝试拉起 ${tries} 次`);
@@ -3679,7 +3711,6 @@ async function confirmPendingEvents(env: Env, config: Config): Promise<void> {
       }
 
       if (kind === "keepalive") {
-        const quiet = s(event.kind) === "keepalive_quiet";
         const doneTitle = quiet ? "单机保活窗口恢复" : "单机保活抢占恢复";
         await repo.updateEvent(env, event.id, {
           title: messages.ev(doneTitle, messages.objServer(fresh.label || "")),
@@ -3702,6 +3733,30 @@ async function confirmPendingEvents(env: Env, config: Config): Promise<void> {
               ),
             );
             await notify.noteNotify(env, event.id, results);
+          } catch (exc) {
+            await record(`通知发送失败：${briefExc(exc)}`, "❌ 通知发送失败");
+          }
+        }
+      }
+
+      // 已开机提醒：手动开机、窗口到点开机在确认 Running 后发。保活抢占
+      // 拉起上面已经发了「抢占恢复」，不再重复发；窗口到点开机只发这条
+      // 中性的已开机，不发「疑被抢占」（那是计划内的开关，不是被抢）。
+      if (target === "Running" && config.notify_on_power === "1") {
+        const scope =
+          kind === "manual"
+            ? messages.SCOPE_MANUAL
+            : kind === "keepalive" && quiet
+              ? messages.SCOPE_KEEPALIVE
+              : "";
+        if (scope) {
+          try {
+            const results = await notify.sendAll(
+              env,
+              config,
+              messages.powerOn(info(fresh), ddnsStatus, scope),
+            );
+            await notify.noteNotify(env, event.id, results, "开机通知");
           } catch (exc) {
             await record(`通知发送失败：${briefExc(exc)}`, "❌ 通知发送失败");
           }
