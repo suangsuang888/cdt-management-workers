@@ -10,7 +10,11 @@ import type { Env } from "./env";
 export const APP_NAME = "cdt-management";
 export const VERSION = "1.3.11-workers";
 export const BRAND = "CDT-Management";
-export const REPO = "BeacherZ/cdt-management";
+// 实际部署的仓库（Workers 移植版）：「关于」页显示的仓库链接。
+export const REPO = "suangsuang888/cdt-management-workers";
+// 上游 Docker 版仓库：仅用于「关于」页检查上游最新 release；
+// 本移植版的版本号带 -workers 后缀，比较时要去掉后缀再比基础版本。
+export const UPSTREAM_REPO = "BeacherZ/cdt-management";
 
 // Reconcile interval (seconds). Below 30s would exhaust the Aliyun API quota.
 export const RECONCILE_INTERVAL_MIN_SECONDS = 30;
