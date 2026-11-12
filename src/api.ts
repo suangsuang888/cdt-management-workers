@@ -1564,7 +1564,12 @@ app.post("/api/v1/settings/test/:channel", async (c) => {
     text: "通知通道测试：配置工作正常。",
   };
   try {
-    await notify.send(c.env, config, channel, message);
+    await notify.send(
+      c.env,
+      config,
+      channel,
+      await notify.withTrafficFooter(c.env, config, message),
+    );
   } catch (e) {
     return c.json({
       ok: false,
