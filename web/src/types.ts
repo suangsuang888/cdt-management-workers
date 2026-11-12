@@ -218,6 +218,7 @@ export type Settings = {
   notify_on_limit_stop: boolean
   notify_on_error: boolean
   notify_on_keepalive: boolean
+  notify_on_power: boolean
   ddns: {
     enabled: boolean
     provider: string
