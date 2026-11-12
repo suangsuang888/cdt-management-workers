@@ -190,6 +190,57 @@ export async function flagValue(env: Env, key: string): Promise<number> {
 }
 
 /**
+ * Store a float value on a flag, but only when the flag does not exist yet.
+ * Used for daily-traffic baselines: the first reconcile of the day records
+ * the month-to-date traffic, and later writes must never move it, or the
+ * day's figure would silently reset to zero.
+ */
+export async function ensureFlagValue(
+  env: Env,
+  key: string,
+  value: number,
+): Promise<void> {
+  await execute(
+    env.DB,
+    "INSERT INTO flags(key, created_at, value) VALUES(?, ?, ?) " +
+      "ON CONFLICT(key) DO NOTHING",
+    [key, nowSeconds(), value],
+  );
+}
+
+/** A flag's attached value as a float; null when absent or not a number. */
+export async function flagValueNum(env: Env, key: string): Promise<number | null> {
+  const row = await queryOne<Row>(env.DB, "SELECT value FROM flags WHERE key=?", [
+    key,
+  ]);
+  if (row === null || row["value"] === null || row["value"] === undefined) {
+    return null;
+  }
+  const value = Number(row["value"]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Daily-traffic baseline keys look like `traffic_day:<serverId>:<YYYY-MM-DD>`. */
+export const TRAFFIC_DAY_PREFIX = "traffic_day:";
+
+/**
+ * Delete daily-traffic baselines except the given dates (YYYY-MM-DD):
+ * only today and yesterday are ever read again.
+ */
+export async function pruneTrafficDayBaselines(
+  env: Env,
+  keepDates: string[],
+): Promise<void> {
+  if (keepDates.length === 0) return;
+  const keep = keepDates.map(() => "substr(key, -10) = ?").join(" OR ");
+  await execute(
+    env.DB,
+    `DELETE FROM flags WHERE substr(key, 1, 12) = 'traffic_day:' AND NOT (${keep})`,
+    keepDates,
+  );
+}
+
+/**
  * Delete a batch of flags by prefix. Uses substr comparison, not LIKE:
  * record names may contain `_`, which is a LIKE wildcard.
  */
